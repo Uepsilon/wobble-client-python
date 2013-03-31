@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import jsonrpclib
+import json
 
 
 class LoginRequiredException(Exception):
@@ -25,6 +26,22 @@ def log_calls(fn):
     return log_calls_decorator
 
 
+def api_error_catcher(fn):
+    def catch_api_error(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except jsonrpclib.jsonrpc.ProtocolError:
+            try:
+                method = json.loads(jsonrpclib.history.request)['method']
+                error_message = 'Wobble-API does not include Method "' + method + '"'
+            except:
+                error_message = 'Errornous Connection to Wobble-API'
+            finally:
+                raise WobbleService.ProtocolError(error_message)
+
+    return catch_api_error
+
+
 def api_key_injector(fn, api_key):
     def inject_api_key(*args, **kwargs):
         # inject the apikeys
@@ -37,6 +54,15 @@ def api_key_injector(fn, api_key):
 
 class WobbleService(object):
     """WobbleService"""
+
+    class ProtocolError(Exception):
+        """No Method Exception"""
+
+        def __init__(self, value):
+            self.value = value
+
+        def __str__(self):
+            return repr(self.value)
 
     def __init__(self, api_endpoint='http://wobble.moinz.de/api/endpoint.php',
                  json_rpc_server_class=jsonrpclib.Server):
@@ -60,8 +86,8 @@ class WobbleService(object):
     @log_calls
     def __getattr__(self, fn_name):
         self.require_login()  # all automatic calls require a login
-        return api_key_injector(getattr(self.wobble_server, fn_name),
-                                self.api_key)
+
+        return api_error_catcher(api_key_injector(getattr(self.wobble_server, fn_name), self.api_key))
 
     @log_calls
     def connect(self, user_name, user_password):
